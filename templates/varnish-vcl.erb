@@ -1,7 +1,10 @@
 # NOTE: this file is managed by puppet
 #
 
+vcl 4.0;
+
 import std;
+import directors;
 
 #Import file with probe definitions
 include "includes/probes.vcl";
@@ -9,8 +12,10 @@ include "includes/probes.vcl";
 #Import file with backend definitions
 include "includes/backends.vcl";
 
-#Import file with director definitions;
-include "includes/directors.vcl";
+sub vcl_init {
+  #Import file with director definitions;
+  include "includes/directors.vcl";
+}
 
 #Import file with acl definitions
 include "includes/acls.vcl";
@@ -41,7 +46,7 @@ sub vcl_recv {
      set req.http.Cookie = regsuball(req.http.Cookie, ";[^ ][^;]*", "");
      set req.http.Cookie = regsuball(req.http.Cookie, "^[; ]+|[; ]+$", "");
     if (req.http.Cookie == "") {
-      remove req.http.Cookie;
+      unset req.http.Cookie;
     }
   }
 
@@ -51,7 +56,7 @@ sub vcl_recv {
      # Plone images cache
      (req.url ~ "(?i)(image|imagem_large|image_preview|image_mini|image_thumb|image_tile|image_icon|imagem_listing)$")
      ) {
-     remove req.http.Cookie;
+     unset req.http.Cookie;
   }
 
   <%- if @blockedips.length > 0 -%>
@@ -75,8 +80,8 @@ sub vcl_recv {
     std.log( "ATTACK SIGNATURE rules:"+req.http.RULE+" url:"+req.url+" COOKIE:"+req.http.Cookie+"   IP:"+client.ip);
     error 403 "ATTACK DETECTED - IP LOGGED";
   }
-  remove req.http.EXCE;
-  remove req.http.RULE;
+  unset req.http.EXCE;
+  unset req.http.RULE;
   <%- end -%>
 
   # backend selection logic
@@ -84,27 +89,25 @@ sub vcl_recv {
 
   <%- if @purgeips.length > 0 -%>
   # Allows purge for the IPs in purge ACL
-  if (req.request == "PURGE") {
+  if (req.method == "PURGE") {
     if (!(client.ip ~ purge)) {
-        error 405 "Not allowed.";
+      return (synth(405, "Not allowed"));
     }
     ban(" req.url == " + req.url);
     set req.url = regsuball(req.url,"80","443"); 
     set req.url = regsuball(req.url,"http","https");
     ban(" req.url == " + req.url);
-    # Throw a synthetic page so the
-    # request won't go to the backend.
-    error 200 "Added ban.";      
+    return (purge);    
   }
   <%- end -%>
 
-  if (req.request != "GET" &&
-      req.request != "HEAD" &&
-      req.request != "PUT" &&
-      req.request != "POST" &&
-      req.request != "TRACE" &&
-      req.request != "OPTIONS" &&
-      req.request != "DELETE") {
+  if (req.method != "GET" &&
+      req.method != "HEAD" &&
+      req.method != "PUT" &&
+      req.method != "POST" &&
+      req.method != "TRACE" &&
+      req.method != "OPTIONS" &&
+      req.method != "DELETE") {
      /* Non-RFC2616 or CONNECT which is weird. */
      return (pipe);
   }
@@ -123,25 +126,17 @@ sub vcl_pipe {
 
 sub vcl_hit {
    std.log( "CACHE-DEBUG URL:"+req.url+" COOKIE:"+req.http.Cookie+" AVISO:HIT IP:"+client.ip);
-   if (req.request == "PURGE") {
-      purge;
-      error 200 "Purged.";
-   }
 }
 
 sub vcl_miss {
     std.log( "CACHE-DEBUG URL:"+req.url+" COOKIE:"+req.http.Cookie+" AVISO:MISS IP:"+client.ip);
-    if (req.request == "PURGE") {
-       purge;
-       error 200 "Purged.";
-    }
 }
 
 sub vcl_pass {
    std.log( "CACHE-DEBUG URL:"+req.url+" COOKIE:"+req.http.Cookie+" AVISO:PASS IP:"+client.ip);
 }
 
-sub vcl_fetch {
+sub vcl_backend_response {
 
 <%- if @defaultgrace -%>
   # Default grace period
@@ -152,30 +147,31 @@ sub vcl_fetch {
      set beresp.do_gzip = true;
   }
  
-  # Remove I18N_LANGUAGE Set-Cookie 
+  # Unset I18N_LANGUAGE Set-Cookie 
   if (beresp.http.Set-Cookie ~ "I18N_LANGUAGE") {
-    remove beresp.http.Set-Cookie;
+    unset beresp.http.Set-Cookie;
   }
 
   # Default minimum cache period 
-  if(!(req.http.Cookie)&&!(beresp.http.Set-Cookie)&&(req.request == "GET")) {
+  if(!(bereq.http.Cookie)&&!(beresp.http.Set-Cookie)&&(bereq.method == "GET")) {
      set beresp.ttl = <%= @min_cache_time %>;
   }
 
   if ( 
      # Static file cache
-     (req.url ~ "(?i)\.(jpg|jpeg|gif|png|tiff|tif|svg|swf|ico|css|kss|js|vsd|doc|ppt|pps|xls|pdf|mp3|mp4|m4a|ogg|mov|avi|wmv|sxw|zip|gz|bz2|tar|rar|odc|odb|odf|odg|odi|odp|ods|odt|sxc|sxd|sxi|sxw|dmg|torrent|deb|msi|iso|rpm|jar|class|flv|exe)$")||
+     (bereq.url ~ "(?i)\.(jpg|jpeg|gif|png|tiff|tif|svg|swf|ico|css|kss|js|vsd|doc|ppt|pps|xls|pdf|mp3|mp4|m4a|ogg|mov|avi|wmv|sxw|zip|gz|bz2|tar|rar|odc|odb|odf|odg|odi|odp|ods|odt|sxc|sxd|sxi|sxw|dmg|torrent|deb|msi|iso|rpm|jar|class|flv|exe)$")||
      # Plone images cache
-     (req.url ~ "(?i)(image|imagem_large|image_preview|image_mini|image_thumb|image_tile|image_icon|imagem_listing)$")
+     (bereq.url ~ "(?i)(image|imagem_large|image_preview|image_mini|image_thumb|image_tile|image_icon|imagem_listing)$")
   ) {
     set beresp.ttl = <%= @static_cache_time %>;
-    remove beresp.http.Set-Cookie;
+    unset beresp.http.Set-Cookie;
   }
 
   #Avoid cache of objects > 100M
   if ( beresp.http.Content-Length ~ "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]" ) { 
+    set beresp.uncacheable = true;
     set beresp.ttl = <%= @static_cache_time %>; 
-    return (hit_for_pass);
+    return (deliver);
   } 
  
 }
@@ -188,37 +184,6 @@ sub vcl_deliver {
      }
 }
 
-sub vcl_error {
-     
-     ## Moved Permanently
-     if (obj.status == 750) {
-        set obj.http.Location = obj.response;
-        set obj.status = 301;
-        return(deliver);
-     }
-
-     set obj.http.Content-Type = "text/html; charset=utf-8";
-     set obj.http.Retry-After = "5";
-     synthetic {"
- <?xml version="1.0" encoding="utf-8"?>
- <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
-  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
- <html>
-   <head>
-     <title>"} + obj.status + " " + obj.response + {"</title>
-   </head>
-   <body>
-     <h1>Error "} + obj.status + " " + obj.response + {"</h1>
-     <p>"} + obj.response + {"</p>
-     <h3>Guru Meditation:</h3>
-     <p>XID: "} + req.xid + {"</p>
-     <hr>
-    <p>Varnish cache server</p>
-   </body>
- </html>
- "};
-     return (deliver);
-}
 # 
 # sub vcl_init {
 # 	return (ok);
