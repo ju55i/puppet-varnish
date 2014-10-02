@@ -3,7 +3,7 @@ class {'varnish':
 }
 
 class { 'varnish::vcl':
-  purgeips => ['127.0.0.1']
+  purgeips => ['"127.0.0.1"', '"172.17.0.0"/16']
 }
 
 # configure probes
