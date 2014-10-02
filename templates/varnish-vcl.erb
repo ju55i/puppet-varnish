@@ -93,6 +93,10 @@ sub vcl_recv {
     if (!(client.ip ~ purge)) {
       return (synth(405, "Not allowed"));
     }
+    if (req.url ~ "^/@@purgebyid/") {
+      ban("obj.http.x-ids-involved ~ #" + regsub(req.url, "^/@@purgebyid/", "") + "#");
+      return (synth(200, "Ban added"));
+    }
     ban(" req.url == " + req.url);
     set req.url = regsuball(req.url,"80","443"); 
     set req.url = regsuball(req.url,"http","https");

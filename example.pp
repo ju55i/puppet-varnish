@@ -2,7 +2,9 @@ class {'varnish':
   add_repo => false,
 }
 
-class { 'varnish::vcl': }
+class { 'varnish::vcl':
+  purgeips => ['127.0.0.1']
+}
 
 # configure probes
 varnish::probe { 'health_check1': 
@@ -25,5 +27,4 @@ varnish::director { 'ytk': backends => [ 'ytk8072' ] }
 # configure selectors
 varnish::selector { 'hatut': condition => 'req.url ~ "^/VirtualHostBase/https/www.jyu.fi:443/hatut"' }
 varnish::selector { 'ytk': condition => 'req.url ~ "^/VirtualHostBase/https/www.jyu.fi:443/ytk"' }
-
 
